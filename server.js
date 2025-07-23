@@ -48,7 +48,7 @@ app.post('/api/save-product', async (req, res) => {
   try {
     const product = new Product(req.body);
     await product.save();
-    res.status(201).json({ message: 'Product saved successfully!' });
+    res.status(201).json({ message: 'Product saved successfully!', product });
   } catch (err) {
     res.status(500).json({ error: 'Failed to save product', details: err });
   }
@@ -352,26 +352,15 @@ app.get('/api/configuration/by-store/:storeId', async (req, res) => {
   try {
     const config = await Configuration.findOne({ storeId: req.params.storeId });
     if (!config) {
-      return res.status(404).json({ valid: false, error: 'Configuration not found' });
+      return res.status(404).json({ subscribe: false });
     }
-    const configData = {
-      _id: config._id,
-      storeId: config.storeId,
-      storeUrl: config.storeUrl,
-      storeEndpoint: config.storeEndpoint,
-      subscription: config.subscription,
-      trialEndsAt: config.trialEndsAt,
-      user: config.user,
-      createdAt: config.createdAt,
-      updatedAt: config.updatedAt
-    };
     if (config.subscription === 'active') {
-      return res.json({ valid: true, config: configData });
+      return res.json({ subscribe: true });
     } else {
-      return res.json({ valid: false, config: configData });
+      return res.json({ subscribe: false });
     }
   } catch (err) {
-    res.status(500).json({ valid: false, error: 'Server error', details: err });
+    res.status(500).json({ subscribe: false });
   }
 });
 

@@ -5,14 +5,24 @@ const jwt = require('jsonwebtoken');
 const JWT_SECRET = 'your_jwt_secret_key'; // Change this to a strong secret in production
 const nodemailer = require('nodemailer');
 const cron = require('node-cron');
+require('dotenv').config();
+const cloudinary = require('cloudinary').v2;
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage() });
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 // Connect to MongoDB
-// mongodb+srv://shubham:XEhbqsmjt4cnACyz@cluster0.ewetbgm.mongodb.net/
-mongoose.connect('mongodb+srv://asitkushel:oecqfOYACIL2NPMd@cluster0.sq7fni5.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', {
+const mongoUri = process.env.MONGODB_URI;
+mongoose.connect(mongoUri, {
   useNewUrlParser: true,
   useUnifiedTopology: true
 }).then(() => {
@@ -30,6 +40,7 @@ const Product = require('./model/Product');
 const User = require('./model/User');
 const bcrypt = require('bcrypt');
 const Configuration = require('./model/Configuration');
+const LayerDesign = require('./model/LayerDesign');
 
 // Auth middleware
 function auth(req, res, next) {
@@ -41,6 +52,16 @@ function auth(req, res, next) {
     req.userId = decoded.userId;
     next();
   });
+}
+
+// Helper middleware to check for superadmin
+function requireSuperAdmin(req, res, next) {
+  User.findById(req.userId).then(user => {
+    if (!user || user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Only superadmin can perform this action' });
+    }
+    next();
+  }).catch(() => res.status(403).json({ error: 'Only superadmin can perform this action' }));
 }
 
 // POST endpoint to save product customization
@@ -361,6 +382,149 @@ app.get('/api/configuration/by-store/:storeId', async (req, res) => {
     }
   } catch (err) {
     res.status(500).json({ subscribe: false });
+  }
+});
+
+// List all unique SQs for the user
+app.get('/api/layerdesigns/sqs', auth, requireSuperAdmin, async (req, res) => {
+  try {
+    const sqs = await LayerDesign.distinct('sq', { user: req.userId });
+    res.json(sqs);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch SQs', details: err });
+  }
+});
+
+// List LayerDesigns by SQ
+app.get('/api/layerdesigns/by-sq/:sq', auth, requireSuperAdmin, async (req, res) => {
+  try {
+    const layerDesigns = await LayerDesign.find({ user: req.userId, sq: req.params.sq });
+    res.json(layerDesigns);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch LayerDesigns', details: err });
+  }
+});
+
+// Create a new LayerDesign
+app.post('/api/layerdesigns', auth, requireSuperAdmin, async (req, res) => {
+  try {
+    const { sq, designName, layersDesign } = req.body;
+    const layerDesign = new LayerDesign({
+      user: req.userId,
+      sq,
+      designName,
+      layersDesign,
+      customizableData: []
+    });
+    await layerDesign.save();
+    res.status(201).json({ message: 'LayerDesign created', layerDesign });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to create LayerDesign', details: err });
+  }
+});
+
+// Get all LayerDesigns for the logged-in user
+app.get('/api/layerdesigns', auth, requireSuperAdmin, async (req, res) => {
+  try {
+    const layerDesigns = await LayerDesign.find({ user: req.userId });
+    res.json(layerDesigns);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch LayerDesigns', details: err });
+  }
+});
+
+// Get a single LayerDesign by ID
+app.get('/api/layerdesigns/:id', auth, requireSuperAdmin, async (req, res) => {
+  try {
+    const layerDesign = await LayerDesign.findOne({ _id: req.params.id, user: req.userId });
+    if (!layerDesign) return res.status(404).json({ error: 'LayerDesign not found' });
+    res.json(layerDesign);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch LayerDesign', details: err });
+  }
+});
+
+// Bulk update SQ for all LayerDesigns
+app.put('/api/layerdesigns/bulk-update-sq', auth, requireSuperAdmin, async (req, res) => {
+  try {
+    const { oldSq, newSq } = req.body;
+    const result = await LayerDesign.updateMany({ user: req.userId, sq: oldSq }, { sq: newSq });
+    res.json({ message: 'SQ updated', modifiedCount: result.modifiedCount });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update SQ', details: err });
+  }
+});
+
+// Bulk delete LayerDesigns by SQ
+app.delete('/api/layerdesigns/by-sq/:sq', auth, requireSuperAdmin, async (req, res) => {
+  try {
+    const result = await LayerDesign.deleteMany({ user: req.userId, sq: req.params.sq });
+    res.json({ message: 'LayerDesigns deleted', deletedCount: result.deletedCount });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete LayerDesigns', details: err });
+  }
+});
+
+// Update a LayerDesign (edit design name, sq, or layersDesign)
+app.put('/api/layerdesigns/:id', auth, requireSuperAdmin, async (req, res) => {
+  try {
+    const { sq, designName, layersDesign, customizableData } = req.body;
+    const update = { sq, designName, layersDesign };
+    if (customizableData) update.customizableData = customizableData;
+    const layerDesign = await LayerDesign.findOneAndUpdate(
+      { _id: req.params.id, user: req.userId },
+      update,
+      { new: true }
+    );
+    if (!layerDesign) return res.status(404).json({ error: 'LayerDesign not found' });
+    res.json({ message: 'LayerDesign updated', layerDesign });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update LayerDesign', details: err });
+  }
+});
+
+// Delete a LayerDesign
+app.delete('/api/layerdesigns/:id', auth, requireSuperAdmin, async (req, res) => {
+  try {
+    const result = await LayerDesign.deleteOne({ _id: req.params.id, user: req.userId });
+    if (result.deletedCount === 0) return res.status(404).json({ error: 'LayerDesign not found' });
+    res.json({ message: 'LayerDesign deleted' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete LayerDesign', details: err });
+  }
+});
+
+// Add customizable data to a LayerDesign
+app.post('/api/layerdesigns/:id/customize', auth, requireSuperAdmin, async (req, res) => {
+  try {
+    const { title, shortDescription, files } = req.body;
+    const update = {
+      $push: { customizableData: { title, shortDescription, files } }
+    };
+    const layerDesign = await LayerDesign.findOneAndUpdate(
+      { _id: req.params.id, user: req.userId },
+      update,
+      { new: true }
+    );
+    if (!layerDesign) return res.status(404).json({ error: 'LayerDesign not found' });
+    res.json({ message: 'Customizable data added', layerDesign });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to add customizable data', details: err });
+  }
+});
+
+app.post('/api/upload', auth, requireSuperAdmin, upload.single('file'), async (req, res) => {
+  try {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder: 'customizer' },
+      (error, result) => {
+        if (error) return res.status(500).json({ error: 'Cloudinary upload failed', details: error });
+        res.json({ url: result.secure_url });
+      }
+    );
+    stream.end(req.file.buffer);
+  } catch (err) {
+    res.status(500).json({ error: 'Upload failed', details: err });
   }
 });
 

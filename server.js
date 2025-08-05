@@ -89,6 +89,8 @@ const createTables = async () => {
         user_id INT NOT NULL,
         sq VARCHAR(255) NOT NULL,
         design_name VARCHAR(255) NOT NULL,
+        product_type ENUM('2d', '3d') DEFAULT '2d',
+        tab_settings JSON DEFAULT ('{"aiEditor": true, "imageEdit": true, "textEdit": true, "colors": true, "clipart": true}'),
         layers_design JSON,
         customizable_data JSON DEFAULT ('[]'),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -760,6 +762,8 @@ app.get('/api/layerdesigns/by-sq/:sq', auth, requireSuperAdmin, async (req, res)
     const formattedDesigns = layerDesigns.map(design => ({
       ...design,
       designName: design.design_name,
+      productType: design.product_type,
+      tabSettings: JSON.parse(design.tab_settings || '{"aiEditor": true, "imageEdit": true, "textEdit": true, "colors": true, "clipart": true}'),
       layersDesign: JSON.parse(design.layers_design || 'null'),
       customizableData: JSON.parse(design.customizable_data || '[]')
     }));
@@ -774,16 +778,26 @@ app.get('/api/layerdesigns/by-sq/:sq', auth, requireSuperAdmin, async (req, res)
 // Create a new LayerDesign
 app.post('/api/layerdesigns', auth, requireSuperAdmin, async (req, res) => {
   try {
-    const { sq, designName, layersDesign } = req.body;
+    const { sq, designName, layersDesign, productType, tabSettings } = req.body;
     const [result] = await pool.execute(
-      'INSERT INTO layer_designs (user_id, sq, design_name, layers_design, customizable_data) VALUES (?, ?, ?, ?, ?)',
-      [req.userId, sq, designName, JSON.stringify(layersDesign), JSON.stringify([])]
+      'INSERT INTO layer_designs (user_id, sq, design_name, product_type, tab_settings, layers_design, customizable_data) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [
+        req.userId, 
+        sq, 
+        designName, 
+        productType || '2d',
+        JSON.stringify(tabSettings || {"aiEditor": true, "imageEdit": true, "textEdit": true, "colors": true, "clipart": true}),
+        JSON.stringify(layersDesign || {}), 
+        JSON.stringify([])
+      ]
     );
 
     const [layerDesigns] = await pool.execute('SELECT * FROM layer_designs WHERE id = ?', [result.insertId]);
     const layerDesign = {
       ...layerDesigns[0],
       designName: layerDesigns[0].design_name,
+      productType: layerDesigns[0].product_type,
+      tabSettings: JSON.parse(layerDesigns[0].tab_settings || '{"aiEditor": true, "imageEdit": true, "textEdit": true, "colors": true, "clipart": true}'),
       layersDesign: JSON.parse(layerDesigns[0].layers_design || 'null'),
       customizableData: JSON.parse(layerDesigns[0].customizable_data || '[]')
     };
@@ -801,6 +815,8 @@ app.get('/api/layerdesigns', auth, requireSuperAdmin, async (req, res) => {
     const formattedDesigns = layerDesigns.map(design => ({
       ...design,
       designName: design.design_name,
+      productType: design.product_type,
+      tabSettings: JSON.parse(design.tab_settings || '{"aiEditor": true, "imageEdit": true, "textEdit": true, "colors": true, "clipart": true}'),
       layersDesign: JSON.parse(design.layers_design || 'null'),
       customizableData: JSON.parse(design.customizable_data || '[]')
     }));
@@ -821,6 +837,8 @@ app.get('/api/layerdesigns/:id', auth, requireSuperAdmin, async (req, res) => {
     const layerDesign = {
       ...layerDesigns[0],
       designName: layerDesigns[0].design_name,
+      productType: layerDesigns[0].product_type,
+      tabSettings: JSON.parse(layerDesigns[0].tab_settings || '{"aiEditor": true, "imageEdit": true, "textEdit": true, "colors": true, "clipart": true}'),
       layersDesign: JSON.parse(layerDesigns[0].layers_design || 'null'),
       customizableData: JSON.parse(layerDesigns[0].customizable_data || '[]')
     };
@@ -855,13 +873,23 @@ app.delete('/api/layerdesigns/by-sq/:sq', auth, requireSuperAdmin, async (req, r
   }
 });
 
-// Update a LayerDesign (edit design name, sq, or layersDesign)
+// Update a LayerDesign (edit design name, sq, layersDesign, productType, tabSettings)
 app.put('/api/layerdesigns/:id', auth, requireSuperAdmin, async (req, res) => {
   try {
-    const { sq, designName, layersDesign, customizableData } = req.body;
+    const { sq, designName, layersDesign, customizableData, productType, tabSettings } = req.body;
     
     let query = 'UPDATE layer_designs SET sq = ?, design_name = ?, layers_design = ?';
     let params = [sq, designName, JSON.stringify(layersDesign)];
+    
+    if (productType) {
+      query += ', product_type = ?';
+      params.push(productType);
+    }
+    
+    if (tabSettings) {
+      query += ', tab_settings = ?';
+      params.push(JSON.stringify(tabSettings));
+    }
     
     if (customizableData) {
       query += ', customizable_data = ?';
@@ -881,6 +909,8 @@ app.put('/api/layerdesigns/:id', auth, requireSuperAdmin, async (req, res) => {
     const layerDesign = {
       ...layerDesigns[0],
       designName: layerDesigns[0].design_name,
+      productType: layerDesigns[0].product_type,
+      tabSettings: JSON.parse(layerDesigns[0].tab_settings || '{"aiEditor": true, "imageEdit": true, "textEdit": true, "colors": true, "clipart": true}'),
       layersDesign: JSON.parse(layerDesigns[0].layers_design || 'null'),
       customizableData: JSON.parse(layerDesigns[0].customizable_data || '[]')
     };
@@ -927,6 +957,8 @@ app.post('/api/layerdesigns/:id/customize', auth, requireSuperAdmin, async (req,
     const layerDesign = {
       ...updatedDesigns[0],
       designName: updatedDesigns[0].design_name,
+      productType: updatedDesigns[0].product_type,
+      tabSettings: JSON.parse(updatedDesigns[0].tab_settings || '{"aiEditor": true, "imageEdit": true, "textEdit": true, "colors": true, "clipart": true}'),
       layersDesign: JSON.parse(updatedDesigns[0].layers_design || 'null'),
       customizableData: JSON.parse(updatedDesigns[0].customizable_data || '[]')
     };
